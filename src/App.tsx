@@ -41,6 +41,8 @@ import {
   Receipt
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { signInWithPopup, signOut } from 'firebase/auth';
+import { auth, googleAuthProvider } from './lib/firebase';
 import { User, InventoryItem, Room, ProcurementRequest, ItemCategory, SchoolSettings } from './types';
 import BarcodeComponent from 'react-barcode';
 import { BarcodeScanner } from './components/BarcodeScanner';
@@ -150,7 +152,37 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleGoogleLogin = async () => {
+    setError('');
+    try {
+      const result = await signInWithPopup(auth, googleAuthProvider);
+      const idToken = await result.user.getIdToken();
+      
+      const res = await fetch('/api/firebase-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken })
+      });
+      
+      const data = await res.json();
+      if (data.success) {
+        setUser(data.user);
+        setError('');
+      } else {
+        setError(data.message || 'Gagal masuk dengan Google');
+      }
+    } catch (err: any) {
+      console.error("Google sign in failed:", err);
+      setError(err.message || 'Gagal autentikasi Google');
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error("Firebase sign out failed:", e);
+    }
     setUser(null);
     setActiveTab('dashboard');
   };
@@ -199,6 +231,38 @@ export default function App() {
               Masuk ke Sistem
             </button>
           </form>
+
+          <div className="relative my-4 flex py-1 items-center">
+            <div className="flex-grow border-t border-slate-200"></div>
+            <span className="flex-shrink mx-4 text-slate-400 text-xs uppercase">atau</span>
+            <div className="flex-grow border-t border-slate-200"></div>
+          </div>
+
+          <button 
+            type="button" 
+            onClick={handleGoogleLogin} 
+            className="w-full py-3 px-4 border border-slate-200 rounded-xl text-slate-700 bg-white hover:bg-slate-50 font-medium flex items-center justify-center gap-2 shadow-sm transition-all duration-200 cursor-pointer"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24">
+              <path
+                fill="#EA4335"
+                d="M12 5.04c1.62 0 3.08.56 4.22 1.64l3.15-3.15C17.45 1.68 14.93 1 12 1 7.24 1 3.2 3.73 1.24 7.7l3.77 2.92C5.9 7.37 8.7 5.04 12 5.04z"
+              />
+              <path
+                fill="#4285F4"
+                d="M23.45 12.27c0-.82-.07-1.61-.21-2.38H12v4.51h6.42c-.28 1.44-1.09 2.66-2.31 3.48l3.6 2.79c2.1-1.94 3.74-4.79 3.74-8.4z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M5.01 14.78c-.24-.72-.38-1.49-.38-2.28s.14-1.56.38-2.28L1.24 7.3C.45 8.9.01 10.7.01 12.6s.44 3.7 1.23 5.3l3.77-2.92z"
+              />
+              <path
+                fill="#34A853"
+                d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.6-2.79c-1.1.74-2.51 1.18-4.36 1.18-3.3 0-6.1-2.33-7.1-5.58L1.13 15.82C3.09 19.8 7.13 23 12 23z"
+              />
+            </svg>
+            Masuk dengan Google
+          </button>
           
           <div className="mt-8 pt-6 border-t border-slate-100 text-center">
             <p className="text-xs text-slate-400">© 2026 NUCEN ESARPRAS v1.0.0</p>

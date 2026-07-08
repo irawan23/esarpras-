@@ -5,9 +5,15 @@ const { Pool } = pg;
 import path from "path";
 import { fileURLToPath } from "url";
 import { GoogleGenAI, Type } from "@google/genai";
+import { adminAuth } from "./src/lib/firebase-admin.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const resolvedFilename = typeof import.meta !== "undefined" && import.meta.url
+  ? fileURLToPath(import.meta.url)
+  : (typeof __filename !== "undefined" ? __filename : "");
+
+const resolvedDirname = resolvedFilename
+  ? path.dirname(resolvedFilename)
+  : (typeof __dirname !== "undefined" ? __dirname : process.cwd());
 
 
 const pool = new Pool({
@@ -24,7 +30,7 @@ pool.on('error', (err) => {
 
 function convertSql(sql: string): string {
   let index = 1;
-  let converted = sql.replace(/\?/g, () => `${index++}`);
+  let converted = sql.replace(/\?/g, () => "$" + index++);
   // Translate SQLite-specific INSERT OR REPLACE to PostgreSQL ON CONFLICT
   if (converted.toUpperCase().includes("INSERT OR REPLACE INTO ROLE_PERMISSIONS")) {
     converted = converted.replace(
@@ -199,7 +205,7 @@ if (parseInt(permCount.count || "0", 10) === 0) {
     console.error("Database seeding failed:", error);
   }
 }
-async function startServer() {
+export async function startServer() {
   const app = express();
   await seedDatabase();
   app.use(express.json({ limit: "50mb" }));
@@ -213,6 +219,54 @@ async function startServer() {
       res.json({ success: true, user });
     } else {
       res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
+  });
+
+  app.post("/api/firebase-login", async (req, res) => {
+    const { idToken } = req.body;
+    try {
+      // Verify the ID token via Firebase Admin SDK
+      const decodedToken = await adminAuth.verifyIdToken(idToken);
+      const { uid, email, name } = decodedToken;
+
+      // 1. Try to find the user by UID first
+      let user = await db.prepare("SELECT id, username, name, role FROM users WHERE uid = ?").get(uid);
+
+      if (!user && email) {
+        // 2. Try to find the user by email next
+        user = await db.prepare("SELECT id, username, name, role FROM users WHERE email = ?").get(email);
+
+        if (user) {
+          // Update existing user record with their new Firebase UID
+          await db.prepare("UPDATE users SET uid = ? WHERE id = ?").run(uid, user.id);
+        } else {
+          // 3. Auto-provision a new user if none exists
+          const username = email.split('@')[0];
+          const defaultRole = 'user'; // safe default role
+          const result = await db.prepare("INSERT INTO users (uid, email, username, name, role) VALUES (?, ?, ?, ?, ?)").run(
+            uid,
+            email,
+            username,
+            name || username,
+            defaultRole
+          );
+          user = {
+            id: result.lastInsertRowid,
+            username,
+            name: name || username,
+            role: defaultRole
+          };
+        }
+      }
+
+      if (user) {
+        res.json({ success: true, user });
+      } else {
+        res.status(400).json({ success: false, message: "Could not map user details." });
+      }
+    } catch (err: any) {
+      console.error("Firebase auth verification failed:", err);
+      res.status(401).json({ success: false, message: "Authentication failed: " + err.message });
     }
   });
 
@@ -1337,16 +1391,22 @@ Sebanyak **${damaged} aset (${damagedPercent}%)** terdeteksi dalam kondisi rusak
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, "dist")));
+    app.use(express.static(path.join(resolvedDirname, "dist")));
     app.get("*", async (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
+      res.sendFile(path.join(resolvedDirname, "dist", "index.html"));
     });
   }
 
-  const PORT = 3000;
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  return app;
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer().then((app) => {
+    const PORT = 3000;
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }).catch(err => {
+    console.error("Failed to start server:", err);
+  });
+}
