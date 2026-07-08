@@ -1,0 +1,10 @@
+{
+  "name": "NUCEN ESARPRAS",
+  "description": "Aplikasi manajemen sarana dan prasarana sekolah profesional dengan fitur inventarisasi barcode, mutasi, opname, dan pelaporan lengkap.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
